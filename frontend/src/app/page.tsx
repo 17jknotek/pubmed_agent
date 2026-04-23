@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { searchPubMed, submitFeedback, SearchResponse, Article, RelevanceScore } from "@/lib/api";
+import Link from "next/link";
 
 export default function Home() {
   const [query, setQuery] = useState("");
@@ -55,6 +56,13 @@ export default function Home() {
           <p className="text-gray-400 text-lg">
             Search biomedical literature with AI-powered relevance ranking
           </p>
+        </div>
+        
+        {/* Eval dashboard link */}
+        <div className="text-center mb-8">
+          <Link href="/eval" className="text-gray-500 hover:text-gray-300 text-sm transition">
+            View eval dashboard →
+          </Link>
         </div>
 
         {/* Search bar */}
