@@ -22,9 +22,13 @@ app = FastAPI(title="PubMed Search API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[os.getenv("FRONTEND_URL", "http://localhost:3000")],
+    allow_origins=[
+        os.getenv("FRONTEND_URL", "http://localhost:3000"),
+        "https://pubmed-agent-nine.vercel.app",
+    ],
+    allow_origin_regex=r"https://pubmed-agent-.*\.vercel\.app",
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
