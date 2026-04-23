@@ -9,12 +9,16 @@ from app.routers import pubmed, evaluate
 
 load_dotenv()
 
-sentry_sdk.init(
-    dsn=os.getenv("SENTRY_DSN"),
-    traces_sample_rate=1.0,
-)
+sentry_dsn = os.getenv("SENTRY_DSN")
+if sentry_dsn:
+    sentry_sdk.init(
+        dsn=sentry_dsn,
+        traces_sample_rate=1.0,
+    )
+else:
+    logger.warning("SENTRY_DSN not set — Sentry disabled")
 
-app = FastAPI(title="Beakr Portfolio API", version="0.1.0")
+app = FastAPI(title="PubMed Search API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
