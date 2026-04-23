@@ -46,6 +46,7 @@ async def search_pubmed(request: PubMedQueryRequest):
         logger.warning(f"LLM judge scoring failed silently | query_id={query_id} | error={e}")
 
     return PubMedQueryResponse(
+        query_id=query_id,
         query=request.query,
         articles=articles,
         ai_summary=summary,

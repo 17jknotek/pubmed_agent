@@ -17,11 +17,12 @@ export interface RelevanceScore {
 }
 
 export interface SearchResponse {
-  query: string;
-  articles: Article[];
-  ai_summary: string;
-  relevance_scores: RelevanceScore[];
-}
+    query_id: string;
+    query: string;
+    articles: Article[];
+    ai_summary: string;
+    relevance_scores: RelevanceScore[];
+  }
 
 export interface EvalStats {
   total_queries: number;

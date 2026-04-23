@@ -22,7 +22,7 @@ export default function Home() {
     try {
       const data = await searchPubMed(query);
       setResults(data);
-      setQueryId(crypto.randomUUID());
+      setQueryId(data.query_id);  // use backend's query_id, not crypto.randomUUID()
     } catch (e) {
       setError("Search failed. Please try again.");
     } finally {
@@ -57,7 +57,7 @@ export default function Home() {
             Search biomedical literature with AI-powered relevance ranking
           </p>
         </div>
-        
+
         {/* Eval dashboard link */}
         <div className="text-center mb-8">
           <Link href="/eval" className="text-gray-500 hover:text-gray-300 text-sm transition">

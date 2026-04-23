@@ -15,6 +15,7 @@ class Article(BaseModel):
     url: str
 
 class PubMedQueryResponse(BaseModel):
+    query_id: str
     query: str
     articles: list[Article]
     ai_summary: str
