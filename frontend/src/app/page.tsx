@@ -1,65 +1,161 @@
-import Image from "next/image";
+"use client";
+
+import { useState } from "react";
+import { searchPubMed, submitFeedback, SearchResponse, Article, RelevanceScore } from "@/lib/api";
 
 export default function Home() {
+  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [results, setResults] = useState<SearchResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<Record<string, number>>({});
+  const [queryId, setQueryId] = useState<string | null>(null);
+
+  async function handleSearch() {
+    if (!query.trim()) return;
+    setLoading(true);
+    setError(null);
+    setResults(null);
+    setFeedback({});
+
+    try {
+      const data = await searchPubMed(query);
+      setResults(data);
+      setQueryId(crypto.randomUUID());
+    } catch (e) {
+      setError("Search failed. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleFeedback(pmid: string, rating: number) {
+    if (!queryId) return;
+    setFeedback(prev => ({ ...prev, [pmid]: rating }));
+    await submitFeedback(queryId, pmid, rating);
+  }
+
+  function getScoreForArticle(pmid: string): RelevanceScore | undefined {
+    return results?.relevance_scores.find(s => s.pmid === pmid);
+  }
+
+  function getScoreBadgeClass(score: number): string {
+    if (score >= 4) return "bg-green-900 text-green-300";
+    if (score === 3) return "bg-yellow-900 text-yellow-300";
+    return "bg-red-900 text-red-300";
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <main className="min-h-screen bg-gray-950 text-gray-100">
+      <div className="max-w-4xl mx-auto px-4 py-16">
+
+        {/* Header */}
+        <div className="mb-12 text-center">
+          <h1 className="text-4xl font-bold text-white mb-3">PubMed Research Agent</h1>
+          <p className="text-gray-400 text-lg">
+            Search biomedical literature with AI-powered relevance ranking
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+
+        {/* Search bar */}
+        <div className="flex gap-3 mb-8">
+          <input
+            type="text"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && handleSearch()}
+            placeholder="e.g. CRISPR off-target effects in cancer therapy"
+            className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition"
+          />
+          <button
+            onClick={handleSearch}
+            disabled={loading}
+            className="bg-blue-600 hover:bg-blue-500 disabled:bg-blue-900 text-white px-6 py-3 rounded-lg font-medium transition"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            {loading ? "Searching..." : "Search"}
+          </button>
         </div>
-      </main>
-    </div>
+
+        {/* Error */}
+        {error && (
+          <div className="bg-red-900/50 border border-red-700 text-red-300 px-4 py-3 rounded-lg mb-6">
+            {error}
+          </div>
+        )}
+
+        {/* AI Summary */}
+        {results && (
+          <div className="bg-blue-950/50 border border-blue-800 rounded-lg px-5 py-4 mb-8">
+            <p className="text-xs font-semibold text-blue-400 uppercase tracking-wider mb-2">AI Summary</p>
+            <p className="text-gray-200 leading-relaxed">{results.ai_summary}</p>
+          </div>
+        )}
+
+        {/* Results */}
+        {results?.articles.map((article: Article) => {
+          const score = getScoreForArticle(article.pmid);
+          const userRating = feedback[article.pmid];
+
+          return (
+            <div key={article.pmid} className="bg-gray-900 border border-gray-800 rounded-lg p-5 mb-4">
+
+              {/* Title + score badge */}
+              <div className="flex items-start justify-between gap-4 mb-2">
+                <a
+                  href={article.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-400 hover:text-blue-300 font-medium leading-snug transition"
+                >
+                  {article.title}
+                </a>
+                {score && (
+                  <span className={`shrink-0 text-sm font-bold px-2 py-1 rounded ${getScoreBadgeClass(score.score)}`}>
+                    {score.score}/5
+                  </span>
+                )}
+              </div>
+
+              {/* Meta */}
+              <p className="text-gray-500 text-sm mb-3">
+                {article.journal} · {article.pub_date} · {article.authors.slice(0, 3).join(", ")}
+                {article.authors.length > 3 && " et al."}
+              </p>
+
+              {/* AI relevance reason */}
+              {score && (
+                <p className="text-gray-400 text-sm italic mb-3">&quot;{score.reason}&quot;</p>
+              )}
+
+              {/* Abstract */}
+              <p className="text-gray-300 text-sm leading-relaxed line-clamp-3 mb-4">
+                {article.abstract}
+              </p>
+
+              {/* Feedback */}
+              <div className="flex items-center gap-2">
+                <span className="text-gray-500 text-xs">Helpful?</span>
+                {[1, 2, 3, 4, 5].map(rating => (
+                  <button
+                    key={rating}
+                    onClick={() => handleFeedback(article.pmid, rating)}
+                    className={`w-7 h-7 rounded text-xs font-bold transition ${
+                      userRating === rating
+                        ? "bg-blue-600 text-white"
+                        : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                    }`}
+                  >
+                    {rating}
+                  </button>
+                ))}
+                {userRating && <span className="text-green-400 text-xs ml-1">Thanks!</span>}
+              </div>
+
+            </div>
+          );
+        })}
+
+      </div>
+    </main>
   );
 }
