@@ -75,22 +75,14 @@ async def drive_auth():
     )
     logger.info("Redirecting user to Google OAuth consent screen")
     response = RedirectResponse(auth_url)
-    # google-auth-oauthlib stores verifier on the Flow instance; persist it across redirect.
-    response.set_cookie(
-        key=OAUTH_STATE_COOKIE,
-        value=state,
-        httponly=True,
-        secure=_is_https(),
-        samesite="lax",
-        max_age=10 * 60,  # 10 minutes
-    )
+    # Store code verifier in cookie — same instance handles callback via Google redirect
     response.set_cookie(
         key=OAUTH_CODE_VERIFIER_COOKIE,
         value=getattr(flow, "code_verifier", ""),
         httponly=True,
         secure=_is_https(),
-        samesite="lax",
-        max_age=10 * 60,  # 10 minutes
+        samesite="none" if _is_https() else "lax",  # "none" required for cross-site cookies
+        max_age=10 * 60,
     )
     return response
 
@@ -98,16 +90,12 @@ async def drive_auth():
 async def drive_callback(
     code: str,
     state: str | None = None,
-    google_oauth_state: str | None = Cookie(None, alias=OAUTH_STATE_COOKIE),
     google_oauth_code_verifier: str | None = Cookie(
         None, alias=OAUTH_CODE_VERIFIER_COOKIE
     ),
 ):
     """Handle OAuth callback — exchange code for token, store in DB, set session cookie"""
     try:
-        if not state or not google_oauth_state or state != google_oauth_state:
-            raise HTTPException(status_code=400, detail="OAuth state mismatch")
-
         flow = get_flow()
         flow.fetch_token(
             code=code,
@@ -115,10 +103,8 @@ async def drive_callback(
         )
         credentials = flow.credentials
 
-        # Generate a session ID — this is all the browser will ever see
         session_id = secrets.token_urlsafe(32)
 
-        # Store token in Supabase keyed to session ID
         db = get_supabase()
         db.table("user_sessions").insert({
             "session_id": session_id,
@@ -129,25 +115,22 @@ async def drive_callback(
 
         logger.info(f"OAuth complete — session created | session_id={session_id[:8]}...")
 
-        # Set httpOnly cookie — browser can't read this with JavaScript
         frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
-        response = RedirectResponse(url=f"{frontend_url}?drive_connected=true")
+        response = RedirectResponse(url=f"{frontend_url}/drive?drive_connected=true")
         response.set_cookie(
             key="session_id",
             value=session_id,
-            httponly=True,   # JS cannot read this
-            secure=_is_https(),     # HTTPS only in prod
-            samesite="lax",
-            max_age=3600 * 24,  # 24 hours
+            httponly=True,
+            secure=_is_https(),
+            samesite="none" if _is_https() else "lax",
+            max_age=3600 * 24,
         )
-        # Clear one-time OAuth cookies
-        response.delete_cookie(key=OAUTH_STATE_COOKIE)
         response.delete_cookie(key=OAUTH_CODE_VERIFIER_COOKIE)
         return response
 
     except Exception as e:
         logger.error(f"OAuth callback failed | error={e}")
-        raise HTTPException(status_code=400, detail="OAuth failed")
+        raise HTTPException(status_code=400, detail=f"OAuth failed: {e}")
 
 @router.get("/files")
 async def list_drive_files(session_id: str = Cookie(None)):
