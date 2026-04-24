@@ -1,16 +1,25 @@
-from fastapi import APIRouter, HTTPException, Cookie, Response
+from __future__ import annotations
+
+import os
+import secrets
+from typing import Any
+
+from fastapi import APIRouter, Cookie, HTTPException
 from fastapi.responses import RedirectResponse
-from loguru import logger
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
-import os
-import secrets
+from loguru import logger
+from pydantic import BaseModel
+
 from app.services.supabase_service import get_supabase
 
 router = APIRouter()
 
-SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+SCOPES: list[str] = ["https://www.googleapis.com/auth/drive.readonly"]
+DRIVE_LIST_PAGE_SIZE = 50
+OAUTH_STATE_COOKIE = "google_oauth_state"
+OAUTH_CODE_VERIFIER_COOKIE = "google_oauth_code_verifier"
 
 def _is_https() -> bool:
     """
@@ -19,6 +28,26 @@ def _is_https() -> bool:
     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
     redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", "")
     return frontend_url.startswith("https://") and redirect_uri.startswith("https://")
+
+
+def _drive_service_for_session(session_id: str):
+    token = _get_token_for_session(session_id)
+    credentials = Credentials(token=token["google_access_token"])
+    return build("drive", "v3", credentials=credentials)
+
+
+def _list_drive_files(service) -> list[dict[str, Any]]:
+    results = (
+        service.files()
+        .list(
+            pageSize=DRIVE_LIST_PAGE_SIZE,
+            fields="files(id, name, mimeType)",
+            q="'me' in owners",
+            orderBy="modifiedTime desc",
+        )
+        .execute()
+    )
+    return results.get("files", [])
 
 def get_flow():
     return Flow.from_client_config(
@@ -48,7 +77,7 @@ async def drive_auth():
     response = RedirectResponse(auth_url)
     # google-auth-oauthlib stores verifier on the Flow instance; persist it across redirect.
     response.set_cookie(
-        key="google_oauth_state",
+        key=OAUTH_STATE_COOKIE,
         value=state,
         httponly=True,
         secure=_is_https(),
@@ -56,7 +85,7 @@ async def drive_auth():
         max_age=10 * 60,  # 10 minutes
     )
     response.set_cookie(
-        key="google_oauth_code_verifier",
+        key=OAUTH_CODE_VERIFIER_COOKIE,
         value=getattr(flow, "code_verifier", ""),
         httponly=True,
         secure=_is_https(),
@@ -68,10 +97,11 @@ async def drive_auth():
 @router.get("/callback")
 async def drive_callback(
     code: str,
-    response: Response,
     state: str | None = None,
-    google_oauth_state: str | None = Cookie(None),
-    google_oauth_code_verifier: str | None = Cookie(None),
+    google_oauth_state: str | None = Cookie(None, alias=OAUTH_STATE_COOKIE),
+    google_oauth_code_verifier: str | None = Cookie(
+        None, alias=OAUTH_CODE_VERIFIER_COOKIE
+    ),
 ):
     """Handle OAuth callback — exchange code for token, store in DB, set session cookie"""
     try:
@@ -111,8 +141,8 @@ async def drive_callback(
             max_age=3600 * 24,  # 24 hours
         )
         # Clear one-time OAuth cookies
-        response.delete_cookie(key="google_oauth_state")
-        response.delete_cookie(key="google_oauth_code_verifier")
+        response.delete_cookie(key=OAUTH_STATE_COOKIE)
+        response.delete_cookie(key=OAUTH_CODE_VERIFIER_COOKIE)
         return response
 
     except Exception as e:
@@ -121,21 +151,11 @@ async def drive_callback(
 
 @router.get("/files")
 async def list_drive_files(session_id: str = Cookie(None)):
-    """List user's Drive files using their stored token"""
     if not session_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    token = _get_token_for_session(session_id)
-    credentials = Credentials(token=token["google_access_token"])
-
-    service = build("drive", "v3", credentials=credentials)
-    results = service.files().list(
-        pageSize=20,
-        fields="files(id, name, mimeType)",
-        q="mimeType='application/vnd.google-apps.document' or mimeType='text/plain'"
-    ).execute()
-
-    files = results.get("files", [])
+    service = _drive_service_for_session(session_id)
+    files = _list_drive_files(service)
     logger.info(f"Listed {len(files)} Drive files | session={session_id[:8]}...")
     return {"files": files}
 
@@ -145,10 +165,7 @@ async def read_drive_file(file_id: str, session_id: str = Cookie(None)):
     if not session_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    token = _get_token_for_session(session_id)
-    credentials = Credentials(token=token["google_access_token"])
-
-    service = build("drive", "v3", credentials=credentials)
+    service = _drive_service_for_session(session_id)
 
     # Export Google Docs as plain text
     try:
@@ -180,3 +197,75 @@ def _get_token_for_session(session_id: str) -> dict:
     if not result.data:
         raise HTTPException(status_code=401, detail="Session not found")
     return result.data[0]
+
+
+class ChatRequest(BaseModel):
+    message: str
+
+@router.post("/chat")
+async def drive_chat(request: ChatRequest, session_id: str = Cookie(None)):
+    if not session_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    service = _drive_service_for_session(session_id)
+    files = _list_drive_files(service)
+
+    # Build file context
+    file_context = f"The user has {len(files)} files in Google Drive:\n"
+    file_context += "\n".join([f"- {f['name']} (id: {f['id']})" for f in files])
+
+    # Find relevant files based on message keywords
+    message_lower = request.message.lower()
+    content_context = ""
+
+    keywords = message_lower.split()
+    relevant_files = [
+        f for f in files
+        if any(kw in f["name"].lower() for kw in keywords if len(kw) > 3)
+    ][:3]  # cap at 3 files to avoid token limits
+
+    # Fall back to most recent files if no keyword match but content is requested
+    if not relevant_files and any(word in message_lower for word in [
+        "summarize", "content", "read", "what does", "format", "wording", "style"
+    ]):
+        relevant_files = files[:2]
+
+    for f in relevant_files:
+        try:
+            content = service.files().export(
+                fileId=f["id"],
+                mimeType="text/plain"
+            ).execute()
+            text = content.decode("utf-8") if isinstance(content, bytes) else content
+            content_context += f"\n\nContent of '{f['name']}':\n{text[:2000]}"
+            logger.info(f"Loaded file content | file={f['name']} | chars={len(text)}")
+        except Exception as e:
+            logger.warning(f"Could not read file | file={f['name']} | error={e}")
+
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
+    try:
+        import anthropic  # type: ignore
+    except ModuleNotFoundError:
+        raise HTTPException(
+            status_code=500,
+            detail="anthropic package not installed on backend",
+        )
+    client = anthropic.Anthropic(api_key=api_key)
+
+    response = client.messages.create(
+        model="claude-sonnet-4-5",
+        max_tokens=1500,
+        system=(
+            "You are a helpful assistant that answers questions about a user's Google Drive files.\n\n"
+            f"{file_context}{content_context}\n\n"
+            "Answer the user's question based on this context. Be concise and helpful. "
+            "If you have file content available, use it directly in your response."
+        ),
+        messages=[{"role": "user", "content": request.message}],
+    )
+
+    answer = response.content[0].text
+    logger.info(f"Drive chat response | session={session_id[:8]}... | chars={len(answer)}")
+    return {"response": answer}

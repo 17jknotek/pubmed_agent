@@ -59,9 +59,12 @@ export default function Home() {
         </div>
 
         {/* Eval dashboard link */}
-        <div className="text-center mb-8">
+        <div className="text-center mb-8 flex justify-center gap-6">
           <Link href="/eval" className="text-gray-500 hover:text-gray-300 text-sm transition">
             View eval dashboard →
+          </Link>
+          <Link href="/drive" className="text-gray-500 hover:text-gray-300 text-sm transition">
+            Drive Agent →
           </Link>
         </div>
 
