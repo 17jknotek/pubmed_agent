@@ -5,7 +5,7 @@ import sentry_sdk
 from dotenv import load_dotenv
 import os
 
-from app.routers import pubmed, evaluate
+from app.routers import pubmed, evaluate, drive
 
 load_dotenv()
 
@@ -34,6 +34,7 @@ app.add_middleware(
 
 app.include_router(pubmed.router, prefix="/api/pubmed", tags=["pubmed"])
 app.include_router(evaluate.router, prefix="/api/evaluate", tags=["evaluate"])
+app.include_router(drive.router, prefix="/api/drive", tags=["drive"])
 
 @app.get("/health")
 async def health():
