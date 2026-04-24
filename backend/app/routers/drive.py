@@ -71,36 +71,27 @@ async def drive_auth():
         access_type="offline",
         include_granted_scopes="true",
         prompt="consent",
-        code_challenge_method="S256",
     )
+    # Remove PKCE params — not needed for server-side flow with client secret
+    from urllib.parse import urlparse, parse_qs, urlencode
+    parsed = urlparse(auth_url)
+    params = parse_qs(parsed.query, keep_blank_values=True)
+    params.pop("code_challenge", None)
+    params.pop("code_challenge_method", None)
+    clean_params = {k: v[0] for k, v in params.items()}
+    clean_url = parsed._replace(query=urlencode(clean_params)).geturl()
+
     logger.info("Redirecting user to Google OAuth consent screen")
-    response = RedirectResponse(auth_url)
-    # Store code verifier in cookie — same instance handles callback via Google redirect
-    response.set_cookie(
-        key=OAUTH_CODE_VERIFIER_COOKIE,
-        value=getattr(flow, "code_verifier", ""),
-        httponly=True,
-        secure=_is_https(),
-        samesite="none" if _is_https() else "lax",  # "none" required for cross-site cookies
-        max_age=10 * 60,
-    )
-    return response
+    return RedirectResponse(clean_url)
 
 @router.get("/callback")
-async def drive_callback(
-    code: str,
-    state: str | None = None,
-    google_oauth_code_verifier: str | None = Cookie(
-        None, alias=OAUTH_CODE_VERIFIER_COOKIE
-    ),
-):
+async def drive_callback(code: str, state: str | None = None):
     """Handle OAuth callback — exchange code for token, store in DB, set session cookie"""
     try:
         flow = get_flow()
-        flow.fetch_token(
-            code=code,
-            code_verifier=google_oauth_code_verifier,
-        )
+        # Fetch token without PKCE verifier
+        import google.auth.transport.requests
+        flow.fetch_token(code=code)
         credentials = flow.credentials
 
         session_id = secrets.token_urlsafe(32)
@@ -125,7 +116,6 @@ async def drive_callback(
             samesite="none" if _is_https() else "lax",
             max_age=3600 * 24,
         )
-        response.delete_cookie(key=OAUTH_CODE_VERIFIER_COOKIE)
         return response
 
     except Exception as e:
