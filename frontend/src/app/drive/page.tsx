@@ -45,7 +45,7 @@ export default function DrivePage() {
 
   async function checkDriveStatus() {
     try {
-      const res = await fetch(`/api/backend/drive/status`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/drive/status`, {
         credentials: "include",
       });
       const data = await res.json();
@@ -58,7 +58,7 @@ export default function DrivePage() {
 
   async function fetchFiles() {
     try {
-      const res = await fetch(`/api/backend/drive/files`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/drive/files`, {
         credentials: "include",
       });
       const data = await res.json();
@@ -98,12 +98,12 @@ export default function DrivePage() {
     setChatLoading(true);
 
     try {
-      const res = await fetch(`/api/backend/drive/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ message: userMessage }),
-      });
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/drive/chat`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ message: userMessage }),
+        });
       if (!res.ok) {
         throw new Error("Chat failed");
       }
@@ -166,7 +166,7 @@ export default function DrivePage() {
             </div>
 
             <a
-              href={`/api/backend/drive/auth`}
+              href={`${process.env.NEXT_PUBLIC_API_URL}/api/drive/auth`}
               className="bg-blue-600 hover:bg-blue-500 text-white px-8 py-3 rounded-lg font-medium transition"
             >
               Connect Google Drive
